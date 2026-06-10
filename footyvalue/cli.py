@@ -28,8 +28,10 @@ from typing import List, Optional
 
 from .ratings import TeamRatings, fit_dixon_coles
 from .engine import ScanConfig, FixtureResult, evaluate_fixture, scan_fixtures
-from .data.football_data import load_matches_csv
+from .data.football_data import load_matches_csv, load_backtest_matches
 from .value import ValueOpportunity
+from .backtest import run_backtest
+from .scanner import PreGameScanner, FixtureOdds, ScannerHit
 
 EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), "..", "examples")
 
@@ -140,6 +142,108 @@ def cmd_inplay(args) -> int:
     return 0
 
 
+def cmd_backtest(args) -> int:
+    history = args.history or os.path.join(EXAMPLES_DIR, "sample_backtest.csv")
+    matches = load_backtest_matches(history)
+    priced = [m for m in matches if m["odds"]]
+    if not priced:
+        print(f"No matches with odds found in {history}", file=sys.stderr)
+        return 1
+
+    result = run_backtest(
+        matches,
+        min_train_matches=args.min_train,
+        refit_every=args.refit_every,
+        xi=args.xi,
+        min_ev=args.min_ev,
+        min_edge=args.min_edge,
+        commission=args.commission,
+        allow_lay=args.lay,
+        staking=args.staking,
+        stake_unit=args.stake_unit,
+        kelly_cap=args.kelly_cap,
+        starting_bankroll=args.bankroll if args.bankroll > 0 else 1000.0,
+    )
+    print(f"Backtest over {len(matches)} matches ({len(priced)} with odds), "
+          f"staking={args.staking}, min_ev={args.min_ev}, "
+          f"lay={'on' if args.lay else 'off'}, commission={args.commission}\n")
+    print(result.summary_text())
+    return 0
+
+
+def _format_hit(hit: ScannerHit) -> str:
+    o = hit.opportunity
+    when = hit.commence_time or "?"
+    return (
+        f"[{o.side.upper()}] {hit.home} v {hit.away} ({when})  "
+        f"{o.market}/{o.selection} @ {o.odds:.2f}  "
+        f"model {o.model_prob*100:.1f}%  EV {o.ev*100:+.1f}%"
+        + (f"  stake {o.stake:,.2f}" if o.stake else "")
+    )
+
+
+def cmd_watch(args) -> int:
+    if args.ratings:
+        ratings = TeamRatings.load(args.ratings)
+    elif args.demo:
+        ratings = fit_dixon_coles(
+            load_matches_csv(os.path.join(EXAMPLES_DIR, "sample_history.csv")),
+            xi=0.0, fit_rho=True,
+        )
+    else:
+        print("watch requires --ratings (or use --demo)", file=sys.stderr)
+        return 1
+
+    if args.demo:
+        from datetime import datetime, timedelta, timezone
+        with open(os.path.join(EXAMPLES_DIR, "sample_fixtures.json")) as fh:
+            raw = json.load(fh)
+        soon = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        demo_fixtures = [
+            FixtureOdds(event_id=str(i), home=fx["home"], away=fx["away"],
+                        commence_time=soon, back=fx["markets"])
+            for i, fx in enumerate(raw) if "minute" not in fx
+        ]
+        source = lambda: demo_fixtures
+        max_polls = 2
+    else:
+        from .scanner import odds_api_source
+        source = odds_api_source(sport=args.sport, api_key=args.api_key)
+        max_polls = args.max_polls
+
+    scanner = PreGameScanner(
+        ratings, source,
+        min_ev=args.min_ev, min_edge=args.min_edge, kelly_cap=args.kelly_cap,
+        bankroll=args.bankroll, commission=args.commission,
+        min_seconds_to_start=args.min_seconds_to_start,
+    )
+
+    poll_no = {"n": 0}
+
+    def on_hit(hit: ScannerHit):
+        print("  " + _format_hit(hit))
+
+    def announce():
+        poll_no["n"] += 1
+        print(f"\n--- poll {poll_no['n']} @ {args.poll}s interval ---")
+
+    # Run with a wrapper that announces each poll.
+    import time as _t
+    polls = 0
+    while max_polls is None or polls < max_polls:
+        announce()
+        hits = scanner.poll_once()
+        if not hits:
+            print("  (no new value)")
+        for h in hits:
+            on_hit(h)
+        polls += 1
+        if max_polls is not None and polls >= max_polls:
+            break
+        _t.sleep(args.poll)
+    return 0
+
+
 def cmd_demo(args) -> int:
     """Self-contained end-to-end demo: fit -> price -> value, no network."""
     history = os.path.join(EXAMPLES_DIR, "sample_history.csv")
@@ -209,6 +313,41 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--odds", help="Odds JSON, e.g. '{\"match_odds\":{\"home\":1.5,...}}'")
     add_thresholds(i)
     i.set_defaults(func=cmd_inplay)
+
+    # backtest
+    b = sub.add_parser("backtest", help="Walk-forward backtest with CLV/ROI metrics")
+    b.add_argument("--history", help="Results+odds CSV (football-data format). "
+                                     "Omit to use the bundled synthetic dataset.")
+    b.add_argument("--min-train", type=int, default=60,
+                   help="Matches required before betting starts")
+    b.add_argument("--refit-every", type=int, default=10,
+                   help="Refit ratings every N matches (speed/accuracy trade-off)")
+    b.add_argument("--xi", type=float, default=0.0, help="Time-decay per day")
+    b.add_argument("--staking", choices=["flat", "kelly"], default="flat",
+                   help="Level stakes (flat) or compounding fractional Kelly")
+    b.add_argument("--stake-unit", type=float, default=1.0, help="Flat stake size")
+    b.add_argument("--lay", action="store_true",
+                   help="Also consider lay bets (treats the price as a lay price)")
+    b.add_argument("--commission", type=float, default=0.0,
+                   help="Exchange commission on net winnings (e.g. 0.02)")
+    add_thresholds(b)
+    b.set_defaults(func=cmd_backtest)
+
+    # watch (continuous pre-game scanner)
+    w = sub.add_parser("watch", help="Continuously scan pre-game fixtures for value")
+    w.add_argument("--ratings", help="Ratings JSON from `fit` (omit with --demo)")
+    w.add_argument("--sport", default="soccer_epl", help="Odds API sport key")
+    w.add_argument("--api-key", default=None, help="Odds API key (or ODDS_API_KEY env)")
+    w.add_argument("--poll", type=float, default=60.0, help="Seconds between polls")
+    w.add_argument("--max-polls", type=int, default=None, help="Stop after N polls")
+    w.add_argument("--commission", type=float, default=0.0,
+                   help="Exchange commission (for lay staking with an exchange feed)")
+    w.add_argument("--min-seconds-to-start", type=float, default=0.0,
+                   help="Skip fixtures starting sooner than this many seconds")
+    w.add_argument("--demo", action="store_true",
+                   help="Run offline against bundled fixtures (no network/API key)")
+    add_thresholds(w)
+    w.set_defaults(func=cmd_watch)
 
     # demo
     d = sub.add_parser("demo", help="Run the bundled offline end-to-end demo")

@@ -111,7 +111,82 @@ export ODDS_API_KEY=your_key_here
 python -m footyvalue.cli scan --ratings ratings.json --live --sport soccer_epl
 ```
 
-### 3. Price an in-play situation
+### 3. Backtest before risking money (CLV / ROI)
+
+Validate a configuration on history **before** betting. The backtester replays
+matches in date order, fits ratings on *only the prior matches* (no lookahead),
+places the value bets the engine would have flagged, settles them, and reports
+ROI plus **closing-line value** — the single most reliable sign an edge is real.
+
+```bash
+# Bundled synthetic dataset (no args needed)
+python -m footyvalue.cli backtest --min-train 56 --refit-every 14 --min-ev 0.03
+
+# Your own football-data.co.uk CSV (with odds columns)
+python -m footyvalue.cli backtest --history E0.csv --min-ev 0.03 --staking flat
+```
+
+Example output on the bundled (deliberately inefficient) synthetic data:
+
+```
+Bets:          302  (won 103, push 0)
+Win rate:      34.1%
+ROI / yield:   +18.56%
+Avg CLV:       +6.97%   (positive: 94%)
+Max drawdown:  37.66
+By market:
+  match_odds       bets  192  ROI  +32.0%
+  over_under_2.5   bets  110  ROI   -4.9%
+```
+
+> The bundled data is synthetic and intentionally exploitable to demonstrate the
+> tooling. **Real markets are far harder** — expect ROI near, or below, zero
+> until you have a genuine edge. Use **flat (level) stakes** to read ROI cleanly;
+> use `--staking kelly` only once an edge is established (it compounds, and is
+> unforgiving of model error — it can and will bust a bankroll on bad estimates).
+
+### 4. Continuously scan pre-game fixtures for value (live)
+
+`watch` polls an odds source on an interval, evaluates every **not-yet-started**
+fixture, and prints newly-appearing value (deduplicated, so you see each price
+once). This is the path for **immediate pre-game value betting**.
+
+```bash
+# Offline demo (no network / API key) — two polls against bundled fixtures
+python -m footyvalue.cli watch --demo --min-ev 0.03 --bankroll 1000
+
+# Live, via The Odds API (bookmaker back prices)
+export ODDS_API_KEY=your_key_here
+python -m footyvalue.cli watch --ratings ratings.json --sport soccer_epl \
+    --min-ev 0.03 --bankroll 1000 --poll 60
+```
+
+Each alert shows the side, fixture, market/selection, price, model probability,
+EV and recommended stake:
+
+```
+[BACK] Wolves v Bears (2026-06-11T...)  over_under_2.5/over @ 2.80  model 40.5%  EV +13.3%  stake 74.11
+```
+
+### Back **and** lay (exchange) staking
+
+Every value check supports both sides with commission on net winnings. Laying at
+odds `L` is treated as a back on the opposite outcome at `L/(L-1)`, so the EV and
+Kelly maths is identical and consistent. Lay value exists when your model thinks
+the selection is **less** likely than its lay price implies (`p < 1/L`).
+
+```python
+from footyvalue.value import evaluate_selection
+opp = evaluate_selection("match_odds", "home", model_prob=0.30,
+                         lay_odds=2.0, commission=0.02, min_ev=0.0)
+print(opp.side, opp.ev, opp.stake, opp.backer_stake)   # lay 0.40 ... liability/backer
+```
+
+The bundled live source (The Odds API) carries **back** prices only. To use lay
+staking live, plug in an exchange feed (e.g. a Betfair adapter) that fills the
+`lay` prices on each `FixtureOdds`; pass `--commission` to model the exchange cut.
+
+### 5. Price an in-play situation
 
 ```bash
 python -m footyvalue.cli inplay --ratings ratings.json \
@@ -174,18 +249,22 @@ footyvalue/
   markets.py      Match Odds, BTTS, Over/Under derived from the matrix
   inplay.py       Live probabilities conditioned on minute + current score
   ratings.py      Time-weighted Dixon-Coles MLE of team attack/defence
-  value.py        EV, edge, Kelly, value detection
+  value.py        EV, edge, Kelly; back + lay (exchange) value detection
+  backtest.py     Walk-forward backtester with CLV / ROI / drawdown metrics
+  scanner.py      Continuous pre-game value scanner (poll, dedup, alert)
   engine.py       Orchestration (ratings + odds -> ranked value bets)
   odds.py         Odds<->prob, overround (vig) removal
-  cli.py          Command-line interface
+  cli.py          Command-line interface (fit/scan/inplay/backtest/watch/demo)
   data/
-    football_data.py   Historical results loader (CSV / URL)
+    football_data.py   Results + odds loader (CSV / URL)
     odds_api.py        Live odds adapter (The Odds API)
 examples/
-  generate_sample_history.py   Reproducible synthetic season
+  generate_sample_history.py   Reproducible synthetic season (results)
+  generate_backtest_data.py    Synthetic multi-season dataset with odds
   sample_history.csv           Bundled training data
   sample_fixtures.json         Bundled fixtures + odds
-tests/                         48 tests covering the maths and pipeline
+  sample_backtest.csv          Bundled results+odds for backtesting
+tests/                         79 tests covering the maths and pipeline
 ```
 
 ## Modelling notes & limitations

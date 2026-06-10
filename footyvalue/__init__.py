@@ -22,7 +22,12 @@ from .value import (
     edge,
     kelly_fraction,
     find_value,
+    evaluate_selection,
+    find_value_exchange,
+    scan_markets_exchange,
 )
+from .backtest import run_backtest, BacktestResult, settle
+from .scanner import PreGameScanner, FixtureOdds, ScannerHit
 
 __all__ = [
     "score_matrix",
@@ -37,6 +42,15 @@ __all__ = [
     "edge",
     "kelly_fraction",
     "find_value",
+    "evaluate_selection",
+    "find_value_exchange",
+    "scan_markets_exchange",
+    "run_backtest",
+    "BacktestResult",
+    "settle",
+    "PreGameScanner",
+    "FixtureOdds",
+    "ScannerHit",
 ]
 
 __version__ = "0.1.0"
