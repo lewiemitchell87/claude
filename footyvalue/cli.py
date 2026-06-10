@@ -41,9 +41,10 @@ EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), "..", "examples")
 # --------------------------------------------------------------------------- #
 def format_opportunity(o: ValueOpportunity) -> str:
     stake = f"  stake {o.stake:,.2f}" if o.stake else ""
+    book = f" @{o.bookmaker}" if o.bookmaker else ""
     return (
         f"    [{o.market:<16}] {o.selection:<6} "
-        f"@ {o.odds:>6.2f}  model {o.model_prob*100:5.1f}%  "
+        f"@ {o.odds:>6.2f}{book}  model {o.model_prob*100:5.1f}%  "
         f"fair {o.fair_odds:>6.2f}  edge {o.edge*100:+5.1f}%  "
         f"EV {o.ev*100:+5.1f}%{stake}"
     )
@@ -114,10 +115,12 @@ def cmd_scan(args) -> int:
     if args.live:
         from .data.odds_api import OddsApiClient
 
+        books = [b.strip() for b in args.bookmakers.split(",")] if args.bookmakers else None
         client = OddsApiClient(api_key=args.api_key)
-        fx = client.fetch_odds(sport=args.sport)
+        fx = client.fetch_odds(sport=args.sport, bookmakers=books)
         fixtures = [
-            {"home": f.home, "away": f.away, "markets": f.markets} for f in fx
+            {"home": f.home, "away": f.away, "markets": f.markets, "sources": f.sources}
+            for f in fx
         ]
     else:
         with open(args.fixtures) as fh:
@@ -174,9 +177,10 @@ def cmd_backtest(args) -> int:
 def _format_hit(hit: ScannerHit) -> str:
     o = hit.opportunity
     when = hit.commence_time or "?"
+    book = f" ({o.bookmaker})" if o.bookmaker else ""
     return (
         f"[{o.side.upper()}] {hit.home} v {hit.away} ({when})  "
-        f"{o.market}/{o.selection} @ {o.odds:.2f}  "
+        f"{o.market}/{o.selection} @ {o.odds:.2f}{book}  "
         f"model {o.model_prob*100:.1f}%  EV {o.ev*100:+.1f}%"
         + (f"  stake {o.stake:,.2f}" if o.stake else "")
     )
@@ -201,14 +205,16 @@ def cmd_watch(args) -> int:
         soon = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         demo_fixtures = [
             FixtureOdds(event_id=str(i), home=fx["home"], away=fx["away"],
-                        commence_time=soon, back=fx["markets"])
+                        commence_time=soon, back=fx["markets"],
+                        back_sources=fx.get("sources", {}))
             for i, fx in enumerate(raw) if "minute" not in fx
         ]
         source = lambda: demo_fixtures
         max_polls = 2
     else:
         from .scanner import odds_api_source
-        source = odds_api_source(sport=args.sport, api_key=args.api_key)
+        books = [b.strip() for b in args.bookmakers.split(",")] if args.bookmakers else None
+        source = odds_api_source(sport=args.sport, api_key=args.api_key, bookmakers=books)
         max_polls = args.max_polls
 
     scanner = PreGameScanner(
@@ -299,6 +305,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--live", action="store_true", help="Fetch live odds via The Odds API")
     s.add_argument("--sport", default="soccer_epl", help="Odds API sport key (with --live)")
     s.add_argument("--api-key", default=None, help="Odds API key (or ODDS_API_KEY env)")
+    s.add_argument("--bookmakers", default=None,
+                   help="Comma-separated books to restrict to (e.g. bet365,williamhill)")
     s.add_argument("--show-all", action="store_true", help="Show fixtures with no value too")
     add_thresholds(s)
     s.set_defaults(func=cmd_scan)
@@ -338,6 +346,8 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--ratings", help="Ratings JSON from `fit` (omit with --demo)")
     w.add_argument("--sport", default="soccer_epl", help="Odds API sport key")
     w.add_argument("--api-key", default=None, help="Odds API key (or ODDS_API_KEY env)")
+    w.add_argument("--bookmakers", default=None,
+                   help="Comma-separated books to restrict to (e.g. bet365,williamhill)")
     w.add_argument("--poll", type=float, default=60.0, help="Seconds between polls")
     w.add_argument("--max-polls", type=int, default=None, help="Stop after N polls")
     w.add_argument("--commission", type=float, default=0.0,

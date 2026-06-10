@@ -33,6 +33,9 @@ class FixtureOdds:
     commence_time: str  # ISO-8601, e.g. "2026-06-10T14:00:00Z"
     back: Dict[str, Dict[str, float]] = field(default_factory=dict)
     lay: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # which bookmaker offers each back/lay price: {market: {selection: book}}
+    back_sources: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    lay_sources: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -122,6 +125,7 @@ class PreGameScanner:
         model = self.ratings.market_probabilities(home, away)
         return scan_markets_exchange(
             model, fixture.back, fixture.lay,
+            back_sources=fixture.back_sources, lay_sources=fixture.lay_sources,
             commission=self.commission, min_edge=self.min_edge,
             min_ev=self.min_ev, kelly_cap=self.kelly_cap, bankroll=self.bankroll,
         )
@@ -174,18 +178,26 @@ def odds_api_source(
     *,
     api_key: Optional[str] = None,
     regions: str = "uk,eu",
+    bookmakers: Optional[List[str]] = None,
 ) -> Callable[[], List[FixtureOdds]]:
-    """Build an odds source backed by The Odds API (bookmaker back prices)."""
+    """Build an odds source backed by The Odds API (bookmaker back prices).
+
+    ``bookmakers`` optionally restricts to specific books (by key or title).
+    """
     from .data.odds_api import OddsApiClient
 
     client = OddsApiClient(api_key=api_key)
 
     def source() -> List[FixtureOdds]:
-        fixtures = client.fetch_odds(sport=sport, regions=regions, markets="h2h,totals,btts")
+        fixtures = client.fetch_odds(
+            sport=sport, regions=regions, markets="h2h,totals,btts",
+            bookmakers=bookmakers,
+        )
         return [
             FixtureOdds(
                 event_id=f.event_id, home=f.home, away=f.away,
                 commence_time=f.commence_time, back=f.markets,
+                back_sources=f.sources,
             )
             for f in fixtures
         ]

@@ -69,6 +69,7 @@ class ValueOpportunity:
     side: str = "back"          # "back" or "lay"
     commission: float = 0.0
     backer_stake: float = 0.0   # for lay bets: the matched stake (stake == liability)
+    bookmaker: str = ""         # which book/exchange offered this price
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -79,6 +80,7 @@ def find_value(
     model_probs: Dict[str, float],
     market_odds: Dict[str, float],
     *,
+    sources: Optional[Dict[str, str]] = None,
     min_edge: float = 0.0,
     min_ev: float = 0.02,
     kelly_cap: float = 0.25,
@@ -94,6 +96,9 @@ def find_value(
         ``{selection: model probability}``.
     market_odds:
         ``{selection: decimal odds}`` offered by the book/exchange.
+    sources:
+        Optional ``{selection: bookmaker}`` naming which book offers each price;
+        attached to each opportunity as ``bookmaker``.
     min_edge:
         Minimum probability edge required to flag a bet.
     min_ev:
@@ -108,6 +113,7 @@ def find_value(
     -------
     list of :class:`ValueOpportunity`, sorted by expected value descending.
     """
+    sources = sources or {}
     out: List[ValueOpportunity] = []
     for selection, odds in market_odds.items():
         if selection not in model_probs:
@@ -132,6 +138,7 @@ def find_value(
                     ev=ev,
                     kelly=kf,
                     stake=bankroll * staked_fraction if bankroll > 0 else 0.0,
+                    bookmaker=sources.get(selection, ""),
                 )
             )
     out.sort(key=lambda o: o.ev, reverse=True)
@@ -142,12 +149,14 @@ def scan_markets(
     model_markets: Dict[str, Dict[str, float]],
     odds_markets: Dict[str, Dict[str, float]],
     *,
+    sources: Optional[Dict[str, Dict[str, str]]] = None,
     min_edge: float = 0.0,
     min_ev: float = 0.02,
     kelly_cap: float = 0.25,
     bankroll: float = 0.0,
 ) -> List[ValueOpportunity]:
     """Run :func:`find_value` across every market present in both inputs."""
+    sources = sources or {}
     results: List[ValueOpportunity] = []
     for market, probs in model_markets.items():
         if market not in odds_markets:
@@ -157,6 +166,7 @@ def scan_markets(
                 market,
                 probs,
                 odds_markets[market],
+                sources=sources.get(market),
                 min_edge=min_edge,
                 min_ev=min_ev,
                 kelly_cap=kelly_cap,
@@ -208,6 +218,8 @@ def evaluate_selection(
     *,
     back_odds: Optional[float] = None,
     lay_odds: Optional[float] = None,
+    back_bookmaker: str = "",
+    lay_bookmaker: str = "",
     commission: float = 0.0,
     min_edge: float = 0.0,
     min_ev: float = 0.02,
@@ -235,6 +247,7 @@ def evaluate_selection(
                     odds=float(back_odds), fair_odds=fair_odds(model_prob),
                     implied_prob=1.0 / back_odds, edge=eg, ev=ev, kelly=kelly,
                     stake=staked, side="back", commission=commission,
+                    bookmaker=back_bookmaker,
                 )
             )
 
@@ -252,7 +265,7 @@ def evaluate_selection(
                     odds=float(lay_odds), fair_odds=fair_odds(win_prob),
                     implied_prob=1.0 / lay_odds, edge=eg, ev=ev, kelly=kelly,
                     stake=liability, side="lay", commission=commission,
-                    backer_stake=backer_stake,
+                    backer_stake=backer_stake, bookmaker=lay_bookmaker,
                 )
             )
 
@@ -267,6 +280,8 @@ def find_value_exchange(
     back_odds: Optional[Dict[str, float]] = None,
     lay_odds: Optional[Dict[str, float]] = None,
     *,
+    back_sources: Optional[Dict[str, str]] = None,
+    lay_sources: Optional[Dict[str, str]] = None,
     commission: float = 0.0,
     min_edge: float = 0.0,
     min_ev: float = 0.02,
@@ -276,12 +291,16 @@ def find_value_exchange(
     """Value selections within one market considering both back and lay prices."""
     back_odds = back_odds or {}
     lay_odds = lay_odds or {}
+    back_sources = back_sources or {}
+    lay_sources = lay_sources or {}
     out: List[ValueOpportunity] = []
     for selection, p in model_probs.items():
         opp = evaluate_selection(
             market, selection, float(p),
             back_odds=back_odds.get(selection),
             lay_odds=lay_odds.get(selection),
+            back_bookmaker=back_sources.get(selection, ""),
+            lay_bookmaker=lay_sources.get(selection, ""),
             commission=commission, min_edge=min_edge, min_ev=min_ev,
             kelly_cap=kelly_cap, bankroll=bankroll,
         )
@@ -296,6 +315,8 @@ def scan_markets_exchange(
     back_markets: Optional[Dict[str, Dict[str, float]]] = None,
     lay_markets: Optional[Dict[str, Dict[str, float]]] = None,
     *,
+    back_sources: Optional[Dict[str, Dict[str, str]]] = None,
+    lay_sources: Optional[Dict[str, Dict[str, str]]] = None,
     commission: float = 0.0,
     min_edge: float = 0.0,
     min_ev: float = 0.02,
@@ -305,6 +326,8 @@ def scan_markets_exchange(
     """Run :func:`find_value_exchange` across every modelled market."""
     back_markets = back_markets or {}
     lay_markets = lay_markets or {}
+    back_sources = back_sources or {}
+    lay_sources = lay_sources or {}
     results: List[ValueOpportunity] = []
     markets = set(back_markets) | set(lay_markets)
     for market in markets:
@@ -314,6 +337,8 @@ def scan_markets_exchange(
             find_value_exchange(
                 market, model_markets[market],
                 back_markets.get(market), lay_markets.get(market),
+                back_sources=back_sources.get(market),
+                lay_sources=lay_sources.get(market),
                 commission=commission, min_edge=min_edge, min_ev=min_ev,
                 kelly_cap=kelly_cap, bankroll=bankroll,
             )

@@ -104,11 +104,24 @@ python -m footyvalue.cli scan --ratings ratings.json \
     --fixtures fixtures.json --min-ev 0.03 --bankroll 1000
 ```
 
-**From live odds** via [The Odds API](https://the-odds-api.com) (free tier):
+**From live odds** via [The Odds API](https://the-odds-api.com) (free tier). The
+adapter aggregates the **best back price** across books and records *which*
+bookmaker offers it, so every flagged bet tells you where to get the price:
 
 ```bash
 export ODDS_API_KEY=your_key_here
 python -m footyvalue.cli scan --ratings ratings.json --live --sport soccer_epl
+
+# Restrict to books you actually hold accounts with:
+python -m footyvalue.cli scan --ratings ratings.json --live --sport soccer_epl \
+    --bookmakers bet365,williamhill,betfair
+```
+
+Output shows the source book after the price:
+
+```
+Foxes vs Eagles
+    [match_odds      ] away   @   2.10 @Pinnacle  model 53.2%  fair 1.88  EV +11.6%  stake 105.82
 ```
 
 ### 3. Backtest before risking money (CLV / ROI)
@@ -158,15 +171,18 @@ python -m footyvalue.cli watch --demo --min-ev 0.03 --bankroll 1000
 # Live, via The Odds API (bookmaker back prices)
 export ODDS_API_KEY=your_key_here
 python -m footyvalue.cli watch --ratings ratings.json --sport soccer_epl \
-    --min-ev 0.03 --bankroll 1000 --poll 60
+    --min-ev 0.03 --bankroll 1000 --poll 60 --bookmakers bet365,williamhill
 ```
 
-Each alert shows the side, fixture, market/selection, price, model probability,
-EV and recommended stake:
+Each alert shows the side, fixture, market/selection, price, **which bookmaker**
+offers it, the model probability, EV and recommended stake:
 
 ```
-[BACK] Wolves v Bears (2026-06-11T...)  over_under_2.5/over @ 2.80  model 40.5%  EV +13.3%  stake 74.11
+[BACK] Wolves v Bears (2026-06-11T...)  over_under_2.5/over @ 2.80 (Pinnacle)  model 40.5%  EV +13.3%  stake 74.11
 ```
+
+`--bookmakers` (on both `scan` and `watch`) restricts pricing to the books you
+choose — matched by Odds API key (`bet365`) or title (`Bet365`).
 
 ### Back **and** lay (exchange) staking
 
@@ -264,7 +280,7 @@ examples/
   sample_history.csv           Bundled training data
   sample_fixtures.json         Bundled fixtures + odds
   sample_backtest.csv          Bundled results+odds for backtesting
-tests/                         79 tests covering the maths and pipeline
+tests/                         87 tests covering the maths and pipeline
 ```
 
 ## Modelling notes & limitations

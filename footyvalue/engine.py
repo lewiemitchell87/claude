@@ -86,8 +86,13 @@ def evaluate_fixture(
     minute: Optional[int] = None,
     home_goals: int = 0,
     away_goals: int = 0,
+    sources: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> FixtureResult:
-    """Price a fixture against its market odds and return ranked value bets."""
+    """Price a fixture against its market odds and return ranked value bets.
+
+    ``sources`` optionally maps ``{market: {selection: bookmaker}}`` so each
+    flagged opportunity records which book offers the price.
+    """
     config = config or ScanConfig()
     model_markets, lam_home, lam_away = model_markets_for_fixture(
         ratings, home, away, config,
@@ -97,6 +102,7 @@ def evaluate_fixture(
     opportunities = scan_markets(
         model_markets,
         odds_markets,
+        sources=sources,
         min_edge=config.min_edge,
         min_ev=config.min_ev,
         kelly_cap=config.kelly_cap,
@@ -138,6 +144,7 @@ def scan_fixtures(
             minute=fx.get("minute"),
             home_goals=fx.get("home_goals", 0),
             away_goals=fx.get("away_goals", 0),
+            sources=fx.get("sources"),
         )
         results.append(result)
 
