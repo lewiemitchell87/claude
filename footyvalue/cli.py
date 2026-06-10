@@ -93,14 +93,42 @@ def _parse_score(score: Optional[str]):
 # Commands
 # --------------------------------------------------------------------------- #
 def cmd_fit(args) -> int:
-    matches = load_matches_csv(args.history)
+    from .ratings import Match as _Match
+    from_date = _Match.parse_date(args.from_date) if args.from_date else None
+
+    if args.format == "international":
+        from .data.international import (
+            load_international_url, load_international_csv, DATASET_URL,
+        )
+        kwargs = dict(
+            from_date=from_date,
+            exclude_friendlies=args.exclude_friendlies,
+            tournaments=[t.strip() for t in args.tournaments.split(",")] if args.tournaments else None,
+        )
+        if args.history:
+            matches = load_international_csv(args.history, **kwargs)
+            src = args.history
+        else:
+            src = args.url or DATASET_URL
+            print(f"Downloading international results from {src} ...")
+            matches = load_international_url(src, **kwargs)
+    else:  # football-data
+        if not args.history:
+            print("football-data format requires --history <csv>", file=sys.stderr)
+            return 1
+        matches = load_matches_csv(args.history)
+        src = args.history
+
     if not matches:
-        print(f"No matches loaded from {args.history}", file=sys.stderr)
+        print(f"No matches loaded from {src}", file=sys.stderr)
         return 1
+
+    n_neutral = sum(1 for m in matches if m.neutral)
     ratings = fit_dixon_coles(matches, xi=args.xi, fit_rho=not args.no_rho)
     ratings.save(args.out)
     print(
-        f"Fitted {len(ratings.teams)} teams from {len(matches)} matches.\n"
+        f"Fitted {len(ratings.teams)} teams from {len(matches)} matches "
+        f"({n_neutral} at neutral venues).\n"
         f"  home advantage: {ratings.home_advantage:+.3f} (log-goals)\n"
         f"  rho:            {ratings.rho:+.3f}\n"
         f"  saved -> {args.out}"
@@ -291,7 +319,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     # fit
     f = sub.add_parser("fit", help="Fit team ratings from a results CSV")
-    f.add_argument("--history", required=True, help="CSV of historical results")
+    f.add_argument("--history", help="CSV of results (omit with --format international "
+                                     "to download the dataset)")
+    f.add_argument("--format", choices=["football-data", "international"],
+                   default="football-data", help="Input schema")
+    f.add_argument("--url", help="Override the international dataset URL")
+    f.add_argument("--from-date", help="Only use matches on/after this date (YYYY-MM-DD)")
+    f.add_argument("--exclude-friendlies", action="store_true",
+                   help="Drop friendlies (international format)")
+    f.add_argument("--tournaments", help="Comma-separated tournament names to keep "
+                                         "(international format)")
     f.add_argument("--out", default="ratings.json", help="Output ratings file")
     f.add_argument("--xi", type=float, default=0.0,
                    help="Time-decay per day (e.g. 0.003). 0 = equal weighting")

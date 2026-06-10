@@ -95,6 +95,27 @@ python -m footyvalue.cli fit --history E0.csv --out ratings.json --xi 0.003
 `--xi` is the per-day time-decay (e.g. `0.003` ≈ a ~230-day half-life). Use `0`
 to weight all matches equally.
 
+**International teams (World Cup, Euros, Nations League).** Domestic-league CSVs
+don't contain national teams, so use the `international` format, which downloads
+the continually-updated [martj42/international_results](https://github.com/martj42/international_results)
+dataset and is **neutral-venue aware** (home advantage is dropped for matches on
+neutral ground, as at most tournaments):
+
+```bash
+python -m footyvalue.cli fit --format international --from-date 2018-01-01 \
+    --xi 0.0015 --out ratings_international.json
+```
+
+A pre-built `examples/ratings_international.json` is included (fitted on 8,100+
+internationals since 2018). When pricing neutral-venue fixtures, pass
+`neutral=True`:
+
+```python
+from footyvalue.ratings import TeamRatings
+r = TeamRatings.load("examples/ratings_international.json")
+print(r.market_probabilities("Brazil", "Spain", neutral=True)["match_odds"])
+```
+
 ### 2. Scan fixtures for value
 
 **From a JSON file** of fixtures + odds (see `examples/sample_fixtures.json`):
@@ -274,13 +295,16 @@ footyvalue/
   data/
     football_data.py   Results + odds loader (CSV / URL)
     odds_api.py        Live odds adapter (The Odds API)
+    international.py    International results loader (martj42 dataset)
 examples/
   generate_sample_history.py   Reproducible synthetic season (results)
   generate_backtest_data.py    Synthetic multi-season dataset with odds
   sample_history.csv           Bundled training data
   sample_fixtures.json         Bundled fixtures + odds
   sample_backtest.csv          Bundled results+odds for backtesting
-tests/                         87 tests covering the maths and pipeline
+  sample_international.csv      Sample international results (for tests)
+  ratings_international.json    Pre-built international ratings (live-ready)
+tests/                         95 tests covering the maths and pipeline
 ```
 
 ## Modelling notes & limitations

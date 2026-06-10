@@ -30,13 +30,18 @@ from .markets import all_markets
 
 @dataclass
 class Match:
-    """A single historical result."""
+    """A single historical result.
+
+    ``neutral`` marks a match played at a neutral venue (common in international
+    tournaments), where the home-advantage term should not apply.
+    """
 
     home: str
     away: str
     home_goals: int
     away_goals: int
     match_date: Optional[date] = None
+    neutral: bool = False
 
     @staticmethod
     def parse_date(value) -> Optional[date]:
@@ -62,22 +67,25 @@ class TeamRatings:
     rho: float = 0.0
     teams: List[str] = field(default_factory=list)
 
-    def expected_goals(self, home: str, away: str) -> Tuple[float, float]:
+    def expected_goals(self, home: str, away: str, neutral: bool = False) -> Tuple[float, float]:
         """Expected goals ``(lambda_home, lambda_away)`` for a fixture.
 
-        Unknown teams default to league-average strength (rating 0).
+        Unknown teams default to league-average strength (rating 0). At a neutral
+        venue (``neutral=True``) the home-advantage term is dropped.
         """
         ah = self.attack.get(home, 0.0)
         aa = self.attack.get(away, 0.0)
         dh = self.defence.get(home, 0.0)
         da = self.defence.get(away, 0.0)
-        lam_home = np.exp(self.home_advantage + ah - da)
+        adv = 0.0 if neutral else self.home_advantage
+        lam_home = np.exp(adv + ah - da)
         lam_away = np.exp(aa - dh)
         return float(lam_home), float(lam_away)
 
-    def market_probabilities(self, home: str, away: str, max_goals: int = 10, ou_lines=(0.5, 1.5, 2.5, 3.5)):
+    def market_probabilities(self, home: str, away: str, max_goals: int = 10,
+                             ou_lines=(0.5, 1.5, 2.5, 3.5), neutral: bool = False):
         """Pre-match probabilities for every market for this fixture."""
-        lam_h, lam_a = self.expected_goals(home, away)
+        lam_h, lam_a = self.expected_goals(home, away, neutral=neutral)
         matrix = score_matrix(lam_h, lam_a, max_goals=max_goals, rho=self.rho)
         return all_markets(matrix, ou_lines=ou_lines)
 
@@ -162,6 +170,8 @@ def fit_dixon_coles(
     hg = np.array([m.home_goals for m in matches], dtype=float)
     ag = np.array([m.away_goals for m in matches], dtype=float)
     weights = _time_weights(matches, xi)
+    # Home advantage applies only to non-neutral venues.
+    home_adv_mult = np.array([0.0 if m.neutral else 1.0 for m in matches])
 
     log_hg_fac = gammaln(hg + 1)
     log_ag_fac = gammaln(ag + 1)
@@ -181,7 +191,7 @@ def fit_dixon_coles(
 
     def neg_log_likelihood(params):
         attack, defence, home_adv, rho = unpack(params)
-        lam = np.exp(home_adv + attack[home_idx] - defence[away_idx])
+        lam = np.exp(home_adv * home_adv_mult + attack[home_idx] - defence[away_idx])
         mu = np.exp(attack[away_idx] - defence[home_idx])
 
         tau = np.ones_like(lam)
