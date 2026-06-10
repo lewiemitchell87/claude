@@ -1,0 +1,41 @@
+[
+  {
+    "home": "Foxes",
+    "away": "Eagles",
+    "markets": {
+      "match_odds": {"home": 5.00, "draw": 3.60, "away": 2.10},
+      "btts": {"yes": 2.05, "no": 1.78},
+      "over_under_2.5": {"over": 2.30, "under": 1.55}
+    }
+  },
+  {
+    "home": "Wolves",
+    "away": "Bears",
+    "markets": {
+      "match_odds": {"home": 4.40, "draw": 3.50, "away": 1.95},
+      "btts": {"yes": 2.10, "no": 1.72},
+      "over_under_2.5": {"over": 2.80, "under": 1.45}
+    }
+  },
+  {
+    "home": "Lions",
+    "away": "Moles",
+    "markets": {
+      "match_odds": {"home": 1.12, "draw": 13.00, "away": 40.00},
+      "btts": {"yes": 2.50, "no": 1.70},
+      "over_under_2.5": {"over": 1.25, "under": 4.00}
+    }
+  },
+  {
+    "home": "Eagles",
+    "away": "Foxes",
+    "minute": 70,
+    "home_goals": 1,
+    "away_goals": 0,
+    "markets": {
+      "match_odds": {"home": 1.15, "draw": 12.00, "away": 60.00},
+      "btts": {"yes": 9.00, "no": 1.10},
+      "over_under_2.5": {"over": 7.00, "under": 1.12}
+    }
+  }
+]

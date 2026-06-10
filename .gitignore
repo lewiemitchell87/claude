@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+.env
+
+# Generated artefacts
+ratings.json
+*.ratings.json
+
+# Local data dumps (keep the bundled sample only)
+/data_cache/
